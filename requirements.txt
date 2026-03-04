@@ -1,3 +1,5 @@
 streamlit
 plotly
 pandas
+st-gsheets-connection
+vnstock3
