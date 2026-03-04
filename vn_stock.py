@@ -9,27 +9,27 @@ from streamlit_gsheets import GSheetsConnection
 st.set_page_config(page_title="Hệ thống Quản trị & DCA Chứng khoán", layout="wide", page_icon="📈")
 
 # --- KẾT NỐI GOOGLE SHEETS ---
-# Yêu cầu file secrets.toml phải được cấu hình đúng
+# Lưu ý: Yêu cầu phải có file .streamlit/secrets.toml chứa thông tin API
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
 except Exception as e:
-    st.error("Chưa cấu hình kết nối Google Sheets. Vui lòng kiểm tra file secrets.toml.")
+    st.error("Chưa kết nối được Google Sheets. Hãy kiểm tra lại file secrets.toml")
     st.stop()
 
-# --- HÀM QUẢN LÝ DỮ LIỆU ĐÁM MÂY ---
+# --- HÀM QUẢN LÝ LỊCH SỬ GIAO DỊCH (ĐÃ SỬA ĐỂ DÙNG GOOGLE SHEETS) ---
 def load_data():
     try:
-        # ttl=0 để luôn lấy dữ liệu mới nhất, không dùng cache cũ
+        # ttl=0 giúp luôn tải dữ liệu mới nhất từ GSheets mà không bị lưu cache cũ
         df = conn.read(worksheet="Sheet1", ttl=0)
-        # Nếu sheet trống hoặc mất định dạng, khởi tạo lại các cột chuẩn
+        # Nếu sheet trống hoặc mất định dạng, tạo lại khung chuẩn
         if df.empty or "Mã CK" not in df.columns:
             return pd.DataFrame(columns=["Ngày", "Mã CK", "Loại lệnh", "Giá (VNĐ)", "Khối lượng"])
-        return df.dropna(subset=["Mã CK"]) # Bỏ các dòng trống
+        return df.dropna(subset=["Mã CK"]) # Bỏ qua các dòng trống
     except Exception:
         return pd.DataFrame(columns=["Ngày", "Mã CK", "Loại lệnh", "Giá (VNĐ)", "Khối lượng"])
 
 def save_data(df):
-    """Ghi đè toàn bộ DataFrame mới lên Google Sheets"""
+    """Hàm mới: Ghi toàn bộ dữ liệu hiện tại lên Google Sheets"""
     conn.update(worksheet="Sheet1", data=df)
 
 def calculate_portfolio(df, ticker):
@@ -40,6 +40,7 @@ def calculate_portfolio(df, ticker):
     avg_price = 0.0
     
     for idx, row in df_ticker.iterrows():
+        # Ép kiểu float để tránh lỗi khi đọc từ Google Sheets (đôi khi bị hiểu là chữ)
         qty = float(row['Khối lượng'])
         price = float(row['Giá (VNĐ)'])
         
@@ -55,7 +56,7 @@ def calculate_portfolio(df, ticker):
                 
     return total_qty, avg_price
 
-# --- HÀM LẤY GIÁ REAL-TIME ---
+# --- HÀM LẤY GIÁ REAL-TIME MẠNH MẼ (CHỐNG LỖI) ---
 @st.cache_data(ttl=60)
 def get_current_price(ticker):
     sources = ['TCBS', 'VCI', 'SSI', 'DNSE']
@@ -75,8 +76,8 @@ def get_current_price(ticker):
             continue
     return 0.0
 
-# --- LOAD DỮ LIỆU TỪ MÂY ---
-with st.spinner('Đang đồng bộ dữ liệu từ Google Sheets...'):
+# --- LOAD DỮ LIỆU ---
+with st.spinner('Đang tải dữ liệu từ Google Sheets...'):
     df_history = load_data()
 
 # ==========================================
@@ -91,19 +92,21 @@ with st.sidebar:
         kl_nhap = st.number_input("Khối lượng", min_value=0, step=100)
         ngay_gd = st.date_input("Ngày giao dịch")
         
-        submit = st.form_submit_button("Lưu lệnh (Đồng bộ lên mây)")
-        
+        submit = st.form_submit_button("Lưu lệnh (Đồng bộ mây)")
         if submit and ma_ck_moi and kl_nhap > 0:
             new_row = pd.DataFrame([{
-                "Ngày": ngay_gd.strftime('%Y-%m-%d'), 
+                "Ngày": ngay_gd.strftime('%Y-%m-%d'), # Định dạng ngày thành chữ để lưu an toàn trên web
                 "Mã CK": ma_ck_moi, 
                 "Loại lệnh": loai_lenh, 
                 "Giá (VNĐ)": gia_nhap, 
                 "Khối lượng": kl_nhap
             }])
             df_history = pd.concat([df_history, new_row], ignore_index=True)
-            save_data(df_history) # Ghi thẳng lên Google Sheets
-            st.success(f"Đã lưu {loai_lenh} {ma_ck_moi} lên Google Sheets!")
+            
+            # --- ĐÃ SỬA: LƯU LÊN MÂY THAY VÌ CSV ---
+            save_data(df_history)
+            
+            st.success(f"Đã lưu lệnh {loai_lenh} {ma_ck_moi} lên Google Sheets!")
             st.rerun()
     
     st.divider()
@@ -113,11 +116,11 @@ with st.sidebar:
 # ==========================================
 # GIAO DIỆN CHÍNH: THỐNG KÊ DANH MỤC
 # ==========================================
-st.title("☁️ Bảng điều khiển Danh mục (Cloud DB)")
+st.title("📈 Bảng điều khiển Danh mục & DCA (Google Sheets)")
 
 list_tickers = df_history["Mã CK"].unique().tolist()
 if not list_tickers:
-    st.info("👈 Chào mừng! Database của bạn đang trống. Hãy nhập lệnh đầu tiên!")
+    st.info("👈 Chào mừng! Bạn chưa có lệnh nào. Hãy nhập lệnh mua đầu tiên ở cột bên trái nhé!")
     st.stop()
 
 selected_ticker = st.selectbox("📌 Chọn mã chứng khoán để phân tích:", list_tickers)
@@ -136,17 +139,19 @@ pnl_pct = (pnl / total_cost) * 100 if total_cost > 0 else 0
 
 st.divider()
 
+# Hiển thị thẻ thông tin
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Giá thị trường (Real-time)", f"{curr_price:,.0f} đ")
 col2.metric("Giá vốn trung bình", f"{hist_price:,.0f} đ")
-col3.metric("Số lượng đang giữ", f"{hist_qty:,.0f} CP")
-col4.metric("Lời/Lỗ tạm tính", f"{pnl:,.0f} đ", f"{pnl_pct:.2f}%")
+col3.metric("Số lượng đang giữ", f"{hist_qty:,} CP")
+col4.metric("Lời/Lỗ tạm tính (Đã trừ phí)", f"{pnl:,.0f} đ", f"{pnl_pct:.2f}%")
 
 if hist_qty == 0:
-    st.warning("Bạn hiện không nắm giữ mã này (Đã bán hết). Mua thêm để kích hoạt tính năng DCA.")
+    st.warning("Bạn hiện không nắm giữ mã này (Đã bán hết). Mua thêm để kích hoạt các tính năng DCA.")
     st.stop()
 
 st.divider()
+
 # ==========================================
 # TÍNH NĂNG 1: GIẢ LẬP DCA XUÔI (WHAT-IF)
 # ==========================================
@@ -258,11 +263,13 @@ with st.expander("👁️ Quản lý & Xóa Lịch sử Giao dịch", expanded=F
             # Lấy index của dòng cần xóa (từ chuỗi text đã chọn)
             idx_to_delete = int(selected_to_delete.split(" |")[0].replace("Dòng ", ""))
             
-            # Xóa dòng đó khỏi DataFrame và lưu lại
+            # Xóa dòng đó khỏi DataFrame
             df_history = df_history.drop(idx_to_delete).reset_index(drop=True)
-            df_history.to_csv(DATA_FILE, index=False)
             
-            st.success("Đã xóa lệnh thành công! Hệ thống đang tải lại số liệu...")
+            # --- ĐÃ SỬA: LƯU LÊN MÂY THAY VÌ CSV ---
+            save_data(df_history)
+            
+            st.success("Đã xóa lệnh khỏi Google Sheets thành công! Hệ thống đang tải lại số liệu...")
             st.rerun() # Refresh app để tính lại giá vốn ngay lập tức
     else:
         st.write("Chưa có lịch sử giao dịch nào.")
