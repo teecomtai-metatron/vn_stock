@@ -149,33 +149,54 @@ if hist_qty == 0:
 st.divider()
 
 # ==========================================
-# PHẦN GOAL-SEEK (TÍNH NGƯỢC DCA)
+# TÍNH NĂNG 2: TÍNH NGƯỢC DCA (GOAL-SEEK)
 # ==========================================
-st.header("🎯 Lên kế hoạch Xuống tiền (Tính toán tự động)")
+st.header("🎯 2. Lên kế hoạch Xuống tiền (Tính toán tự động)")
+st.markdown("Phần mềm sẽ tự giải phương trình để tìm ra **Khối lượng** và **Số tiền** cần nạp dựa trên mục tiêu chốt lời của bạn.")
+
 with st.form("dca_reverse_form"):
     col_a, col_b, col_c = st.columns(3)
     with col_a:
-        target_profit_pct = st.number_input("% Lãi kỳ vọng (VD: 5%)", value=2.0, step=0.5) / 100
+        target_profit_pct = st.number_input("% Lãi kỳ vọng trên TỔNG vốn (VD: Nhập 5 cho 5%)", value=2.0, step=0.5) / 100
     with col_b:
         target_sell_price = st.number_input("Giá dự kiến chốt lời (VNĐ)", value=float(hist_price), step=100.0)
     with col_c:
-        dca_buy_price = st.number_input("Giá bắt đáy hiện tại (VNĐ)", value=float(curr_price), step=100.0)
+        dca_buy_price = st.number_input("Giá mua bắt đáy hiện tại (VNĐ)", value=float(curr_price), step=100.0)
+
     calc_submit = st.form_submit_button("Lập kế hoạch giải ngân 🚀")
 
 if calc_submit:
+    # Công thức Goal-Seek
     numerator = hist_qty * (hist_price * (1 + target_profit_pct) - target_sell_price)
     denominator = target_sell_price - dca_buy_price * (1 + target_profit_pct)
     
     if denominator <= 0:
-        st.error("❌ Mục tiêu phi thực tế về mặt toán học.")
+        st.error(f"❌ **Mục tiêu phi thực tế!** \n\nVới mức giá bắt đáy {dca_buy_price:,.0f}đ và đòi hỏi lãi {target_profit_pct*100}%, giá chốt lời phải lớn hơn {(dca_buy_price * (1 + target_profit_pct)):,.0f}đ.")
     else:
         q_new = numerator / denominator
+        
         if q_new <= 0:
-            st.success("✅ Không cần nạp thêm tiền!")
+            st.success("✅ **Không cần nạp thêm tiền!** Với khối lượng và giá vốn hiện tại, nếu thị trường lên mức chốt lời kia, bạn đã tự động đạt (hoặc vượt) mức % lãi mong muốn rồi.")
         else:
+            # Làm tròn lô 100 cổ phiếu (Chuẩn chứng khoán VN)
             q_new_rounded = math.ceil(q_new / 100) * 100 
             required_capital = q_new_rounded * dca_buy_price
-            st.success(f"🔥 **CHỈ LỆNH THỰC THI:** Cần nạp {required_capital:,.0f}đ mua thêm {q_new_rounded:,} CP.")
+            
+            new_avg_proof = (hist_qty * hist_price + q_new_rounded * dca_buy_price) / (hist_qty + q_new_rounded)
+            
+            st.success(f"🔥 **CHỈ LỆNH THỰC THI CHO MÃ {selected_ticker}:**")
+            st.markdown(f"""
+            * Khối lượng cần mua thêm (Bắt đáy): **{q_new_rounded:,}** Cổ phiếu
+            * Dòng tiền cần chuẩn bị nạp vào: **{required_capital:,.0f} VNĐ**
+            """)
+            
+            st.info(f"""
+            **💡 Giải thích dòng tiền:**
+            Nếu bạn nạp **{required_capital:,.0f}đ** để mua thêm **{q_new_rounded:,}** cổ phiếu giá **{dca_buy_price:,.0f}đ**:
+            1. Giá vốn trung bình mới của bạn sẽ rớt xuống: **{new_avg_proof:,.0f} đ/CP**.
+            2. Chờ đợi thị trường phục hồi lên đúng **{target_sell_price:,.0f} đ**, bạn đặt lệnh Bán Toàn Bộ.
+            3. Bạn sẽ thu về đúng **{target_profit_pct * 100}%** lợi nhuận (trên tổng gốc cũ + gốc mới)!
+            """)
 
 st.divider()
 
@@ -208,4 +229,3 @@ with st.expander("👁️ Quản lý & Xóa Lịch sử Giao dịch", expanded=F
             st.rerun() # Refresh app để tính lại giá vốn ngay lập tức
     else:
         st.write("Chưa có lịch sử giao dịch nào.")
-
