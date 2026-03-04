@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from vnstock3 import Vnstock
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import math
@@ -209,3 +208,4 @@ with st.expander("👁️ Quản lý & Xóa Lịch sử Giao dịch", expanded=F
             st.rerun() # Refresh app để tính lại giá vốn ngay lập tức
     else:
         st.write("Chưa có lịch sử giao dịch nào.")
+
