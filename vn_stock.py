@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from vnstock3 import Vnstock
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import math
@@ -200,3 +199,4 @@ with st.expander("👁️ Quản lý & Xóa Lịch sử Giao dịch", expanded=F
             save_data(df_history) # Cập nhật lại lên Google Sheets
             st.success("Đã xóa lệnh khỏi Google Sheets! Đang tải lại...")
             st.rerun()
+
