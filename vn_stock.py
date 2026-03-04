@@ -147,6 +147,43 @@ if hist_qty == 0:
     st.stop()
 
 st.divider()
+# ==========================================
+# TÍNH NĂNG 1: GIẢ LẬP DCA XUÔI (WHAT-IF)
+# ==========================================
+st.header("📉 1. Giả lập Trung bình giá (Nhập tay)")
+c1, c2 = st.columns([1, 1])
+
+with c1:
+    dca_price = st.number_input("Mức giá dự kiến mua thêm (VNĐ)", min_value=0.0, value=float(curr_price), step=100.0, key="dca_price")
+    dca_qty = st.number_input("Số lượng định mua thêm (Cổ phiếu)", min_value=0, value=500, step=100, key="dca_qty")
+
+new_total_qty = hist_qty + dca_qty
+new_avg_price = ((hist_price * hist_qty) + (dca_price * dca_qty)) / new_total_qty if new_total_qty > 0 else hist_price
+
+with c2:
+    st.info(f"Tổng khối lượng mới: **{new_total_qty:,}** CP")
+    st.info(f"Giá vốn mới: **{new_avg_price:,.0f} đ**")
+    diff = new_avg_price - hist_price
+    if diff > 0:
+        st.warning(f"⚠️ Giá vốn TĂNG thêm: **{diff:,.0f} đ**")
+    elif diff < 0:
+        st.success(f"✅ Giá vốn GIẢM đi: **{abs(diff):,.0f} đ**")
+
+# Biểu đồ PnL
+sim_prices = [curr_price * (1 + i/100) for i in range(-20, 21)]
+pnl_sim = [(p * new_total_qty) - (new_avg_price * new_total_qty) - (p * new_total_qty * fee_pct) for p in sim_prices]
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=sim_prices, y=pnl_sim, mode='lines', name="Lợi nhuận dự kiến", line=dict(color='#00b4d8', width=3), fill='tozeroy', fillcolor='rgba(0, 180, 216, 0.1)'))
+fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+
+break_even_point = new_avg_price / (1 - fee_pct)
+fig.add_vline(x=break_even_point, line_dash="dot", line_color="#ff9f1c", annotation_text=f"Hòa vốn: {break_even_point:,.0f}đ", annotation_position="top left")
+
+fig.update_layout(xaxis_title="Giá thị trường (VNĐ)", yaxis_title="Tiền lời/lỗ (VNĐ)", hovermode="x unified", margin=dict(t=30, b=0))
+st.plotly_chart(fig, use_container_width=True)
+
+st.divider()
 
 # ==========================================
 # TÍNH NĂNG 2: TÍNH NGƯỢC DCA (GOAL-SEEK)
