@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-from vnstock3 import Vnstock
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import os
