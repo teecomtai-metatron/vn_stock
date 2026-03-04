@@ -1,5 +1,6 @@
 streamlit
-plotly
 pandas
-st-gsheets-connection
+plotly
 vnstock3
+st-gsheets-connection
+ipython
