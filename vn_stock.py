@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from vnstock3 import Vnstock
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import math
@@ -180,23 +181,31 @@ if calc_submit:
 st.divider()
 
 # ==========================================
-# QUẢN LÝ & XÓA LỊCH SỬ GIAO DỊCH (CLOUD)
+# QUẢN LÝ & XÓA LỊCH SỬ GIAO DỊCH
 # ==========================================
 with st.expander("👁️ Quản lý & Xóa Lịch sử Giao dịch", expanded=False):
     if not df_history.empty:
+        # Hiển thị bảng dữ liệu
         st.dataframe(df_history, use_container_width=True)
-        st.markdown("### 🗑️ Xóa lệnh giao dịch")
         
+        st.markdown("### 🗑️ Xóa lệnh giao dịch (Hủy bỏ)")
+        
+        # Tạo danh sách các lệnh để người dùng chọn xóa
         delete_options = []
         for idx, row in df_history.iterrows():
-            delete_options.append(f"Dòng {idx} | Ngày {row['Ngày']} | {row['Loại lệnh']} {row['Khối lượng']} CP {row['Mã CK']}")
+            delete_options.append(f"Dòng {idx} | Ngày {row['Ngày']} | {row['Loại lệnh']} {row['Khối lượng']} CP {row['Mã CK']} | Giá: {row['Giá (VNĐ)']}")
             
-        selected_to_delete = st.selectbox("Chọn lệnh muốn xóa khỏi Google Sheets:", delete_options)
+        selected_to_delete = st.selectbox("Chọn lệnh bạn nhập sai hoặc muốn hủy bỏ:", delete_options)
         
-        if st.button("❌ Xóa lệnh này vĩnh viễn"):
+        if st.button("❌ Xóa lệnh này"):
+            # Lấy index của dòng cần xóa (từ chuỗi text đã chọn)
             idx_to_delete = int(selected_to_delete.split(" |")[0].replace("Dòng ", ""))
+            
+            # Xóa dòng đó khỏi DataFrame và lưu lại
             df_history = df_history.drop(idx_to_delete).reset_index(drop=True)
-            save_data(df_history) # Cập nhật lại lên Google Sheets
-            st.success("Đã xóa lệnh khỏi Google Sheets! Đang tải lại...")
-            st.rerun()
-
+            df_history.to_csv(DATA_FILE, index=False)
+            
+            st.success("Đã xóa lệnh thành công! Hệ thống đang tải lại số liệu...")
+            st.rerun() # Refresh app để tính lại giá vốn ngay lập tức
+    else:
+        st.write("Chưa có lịch sử giao dịch nào.")
