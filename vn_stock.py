@@ -1,35 +1,34 @@
 import streamlit as st
 import pandas as pd
+from vnstock3 import Vnstock
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import math
+import os
 from streamlit_gsheets import GSheetsConnection
 
 # --- CẤU HÌNH TRANG ---
 st.set_page_config(page_title="Hệ thống Quản trị & DCA Chứng khoán", layout="wide", page_icon="📈")
 
 # --- KẾT NỐI GOOGLE SHEETS ---
-# Lưu ý: Yêu cầu phải có file .streamlit/secrets.toml chứa thông tin API
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
 except Exception as e:
     st.error("Chưa kết nối được Google Sheets. Hãy kiểm tra lại file secrets.toml")
     st.stop()
 
-# --- HÀM QUẢN LÝ LỊCH SỬ GIAO DỊCH (ĐÃ SỬA ĐỂ DÙNG GOOGLE SHEETS) ---
+# --- HÀM QUẢN LÝ LỊCH SỬ GIAO DỊCH TRÊN MÂY ---
 def load_data():
     try:
-        # ttl=0 giúp luôn tải dữ liệu mới nhất từ GSheets mà không bị lưu cache cũ
         df = conn.read(worksheet="Sheet1", ttl=0)
-        # Nếu sheet trống hoặc mất định dạng, tạo lại khung chuẩn
         if df.empty or "Mã CK" not in df.columns:
             return pd.DataFrame(columns=["Ngày", "Mã CK", "Loại lệnh", "Giá (VNĐ)", "Khối lượng"])
-        return df.dropna(subset=["Mã CK"]) # Bỏ qua các dòng trống
+        return df.dropna(subset=["Mã CK"])
     except Exception:
         return pd.DataFrame(columns=["Ngày", "Mã CK", "Loại lệnh", "Giá (VNĐ)", "Khối lượng"])
 
 def save_data(df):
-    """Hàm mới: Ghi toàn bộ dữ liệu hiện tại lên Google Sheets"""
+    """Ghi toàn bộ dữ liệu hiện tại lên Google Sheets"""
     conn.update(worksheet="Sheet1", data=df)
 
 def calculate_portfolio(df, ticker):
@@ -40,7 +39,6 @@ def calculate_portfolio(df, ticker):
     avg_price = 0.0
     
     for idx, row in df_ticker.iterrows():
-        # Ép kiểu float để tránh lỗi khi đọc từ Google Sheets (đôi khi bị hiểu là chữ)
         qty = float(row['Khối lượng'])
         price = float(row['Giá (VNĐ)'])
         
@@ -56,9 +54,15 @@ def calculate_portfolio(df, ticker):
                 
     return total_qty, avg_price
 
-# --- HÀM LẤY GIÁ REAL-TIME MẠNH MẼ (CHỐNG LỖI) ---
+# --- HÀM LẤY GIÁ BẰNG API (CÓ TÍCH HỢP KEY) ---
 @st.cache_data(ttl=60)
-def get_current_price(ticker):
+def get_current_price(ticker, api_key=""):
+    # Nạp API Key vào biến môi trường nếu có
+    if api_key:
+        os.environ['VNSTOCK_API_KEY'] = api_key
+    elif "VNSTOCK_API_KEY" in st.secrets:
+        os.environ['VNSTOCK_API_KEY'] = st.secrets["VNSTOCK_API_KEY"]
+        
     sources = ['TCBS', 'VCI', 'SSI', 'DNSE']
     end_date = datetime.now().strftime('%Y-%m-%d')
     start_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
@@ -95,28 +99,28 @@ with st.sidebar:
         submit = st.form_submit_button("Lưu lệnh (Đồng bộ mây)")
         if submit and ma_ck_moi and kl_nhap > 0:
             new_row = pd.DataFrame([{
-                "Ngày": ngay_gd.strftime('%Y-%m-%d'), # Định dạng ngày thành chữ để lưu an toàn trên web
+                "Ngày": ngay_gd.strftime('%Y-%m-%d'), 
                 "Mã CK": ma_ck_moi, 
                 "Loại lệnh": loai_lenh, 
                 "Giá (VNĐ)": gia_nhap, 
                 "Khối lượng": kl_nhap
             }])
             df_history = pd.concat([df_history, new_row], ignore_index=True)
-            
-            # --- ĐÃ SỬA: LƯU LÊN MÂY THAY VÌ CSV ---
             save_data(df_history)
-            
             st.success(f"Đã lưu lệnh {loai_lenh} {ma_ck_moi} lên Google Sheets!")
             st.rerun()
     
     st.divider()
     st.header("⚙️ Cài đặt chung")
     fee_pct = st.slider("Phí giao dịch + Thuế (%)", 0.0, 1.0, 0.25, step=0.05) / 100
+    
+    with st.expander("🔑 Cấu hình Vnstock API"):
+        user_api_key = st.text_input("Nhập API Key (Nếu chưa cài trong secrets.toml)", type="password")
 
 # ==========================================
 # GIAO DIỆN CHÍNH: THỐNG KÊ DANH MỤC
 # ==========================================
-st.title("📈 Bảng điều khiển Danh mục & DCA (Google Sheets)")
+st.title("📈 Bảng điều khiển Danh mục & DCA (Cloud + API)")
 
 list_tickers = df_history["Mã CK"].unique().tolist()
 if not list_tickers:
@@ -125,13 +129,35 @@ if not list_tickers:
 
 selected_ticker = st.selectbox("📌 Chọn mã chứng khoán để phân tích:", list_tickers)
 
-# Tính toán các thông số
+# Tính toán các thông số Vốn
 hist_qty, hist_price = calculate_portfolio(df_history, selected_ticker)
-curr_price = get_current_price(selected_ticker)
 
-if curr_price == 0:
-    curr_price = st.number_input(f"Nhập tay giá {selected_ticker} hiện tại (do lỗi API)", value=float(hist_price), step=100.0)
+st.divider()
 
+# --- LẤY GIÁ BẰNG API VÀ CHO PHÉP CHỈNH SỬA TAY ---
+st.markdown(f"### 🏷️ Cập nhật giá thị trường hiện tại ({selected_ticker})")
+
+with st.spinner("Đang kết nối API Vnstock lấy giá Real-time..."):
+    api_price = get_current_price(selected_ticker, api_key=user_api_key)
+
+if api_price > 0:
+    st.success("✅ Đã kết nối API thành công!")
+    default_market_price = api_price
+else:
+    st.warning("⚠️ Mạng lag hoặc API chặn. Chuyển sang chế độ nhập tay!")
+    # Lấy giá của lệnh giao dịch gần nhất làm gợi ý
+    df_ticker_hist = df_history[df_history["Mã CK"] == selected_ticker]
+    default_market_price = float(df_ticker_hist.iloc[-1]["Giá (VNĐ)"]) if not df_ticker_hist.empty else float(hist_price)
+
+# Ô hiển thị giá (Được điền sẵn bởi API, nhưng vẫn có thể sửa tay)
+curr_price = st.number_input(
+    f"Giá hiện tại của {selected_ticker} (VNĐ):", 
+    min_value=0.0, 
+    value=default_market_price, 
+    step=100.0
+)
+
+# Tính toán Lời/Lỗ
 total_cost = hist_price * hist_qty
 market_value = curr_price * hist_qty
 pnl = market_value - total_cost - (market_value * fee_pct) 
@@ -141,9 +167,9 @@ st.divider()
 
 # Hiển thị thẻ thông tin
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Giá thị trường (Real-time)", f"{curr_price:,.0f} đ")
+col1.metric("Giá thị trường đang xét", f"{curr_price:,.0f} đ")
 col2.metric("Giá vốn trung bình", f"{hist_price:,.0f} đ")
-col3.metric("Số lượng đang giữ", f"{hist_qty:,} CP")
+col3.metric("Số lượng đang giữ", f"{hist_qty:,.0f} CP")
 col4.metric("Lời/Lỗ tạm tính (Đã trừ phí)", f"{pnl:,.0f} đ", f"{pnl_pct:.2f}%")
 
 if hist_qty == 0:
@@ -166,7 +192,7 @@ new_total_qty = hist_qty + dca_qty
 new_avg_price = ((hist_price * hist_qty) + (dca_price * dca_qty)) / new_total_qty if new_total_qty > 0 else hist_price
 
 with c2:
-    st.info(f"Tổng khối lượng mới: **{new_total_qty:,}** CP")
+    st.info(f"Tổng khối lượng mới: **{new_total_qty:,.0f}** CP")
     st.info(f"Giá vốn mới: **{new_avg_price:,.0f} đ**")
     diff = new_avg_price - hist_price
     if diff > 0:
@@ -208,7 +234,6 @@ with st.form("dca_reverse_form"):
     calc_submit = st.form_submit_button("Lập kế hoạch giải ngân 🚀")
 
 if calc_submit:
-    # Công thức Goal-Seek
     numerator = hist_qty * (hist_price * (1 + target_profit_pct) - target_sell_price)
     denominator = target_sell_price - dca_buy_price * (1 + target_profit_pct)
     
@@ -220,21 +245,19 @@ if calc_submit:
         if q_new <= 0:
             st.success("✅ **Không cần nạp thêm tiền!** Với khối lượng và giá vốn hiện tại, nếu thị trường lên mức chốt lời kia, bạn đã tự động đạt (hoặc vượt) mức % lãi mong muốn rồi.")
         else:
-            # Làm tròn lô 100 cổ phiếu (Chuẩn chứng khoán VN)
             q_new_rounded = math.ceil(q_new / 100) * 100 
             required_capital = q_new_rounded * dca_buy_price
-            
             new_avg_proof = (hist_qty * hist_price + q_new_rounded * dca_buy_price) / (hist_qty + q_new_rounded)
             
             st.success(f"🔥 **CHỈ LỆNH THỰC THI CHO MÃ {selected_ticker}:**")
             st.markdown(f"""
-            * Khối lượng cần mua thêm (Bắt đáy): **{q_new_rounded:,}** Cổ phiếu
+            * Khối lượng cần mua thêm (Bắt đáy): **{q_new_rounded:,.0f}** Cổ phiếu
             * Dòng tiền cần chuẩn bị nạp vào: **{required_capital:,.0f} VNĐ**
             """)
             
             st.info(f"""
             **💡 Giải thích dòng tiền:**
-            Nếu bạn nạp **{required_capital:,.0f}đ** để mua thêm **{q_new_rounded:,}** cổ phiếu giá **{dca_buy_price:,.0f}đ**:
+            Nếu bạn nạp **{required_capital:,.0f}đ** để mua thêm **{q_new_rounded:,.0f}** cổ phiếu giá **{dca_buy_price:,.0f}đ**:
             1. Giá vốn trung bình mới của bạn sẽ rớt xuống: **{new_avg_proof:,.0f} đ/CP**.
             2. Chờ đợi thị trường phục hồi lên đúng **{target_sell_price:,.0f} đ**, bạn đặt lệnh Bán Toàn Bộ.
             3. Bạn sẽ thu về đúng **{target_profit_pct * 100}%** lợi nhuận (trên tổng gốc cũ + gốc mới)!
@@ -247,12 +270,9 @@ st.divider()
 # ==========================================
 with st.expander("👁️ Quản lý & Xóa Lịch sử Giao dịch", expanded=False):
     if not df_history.empty:
-        # Hiển thị bảng dữ liệu
         st.dataframe(df_history, use_container_width=True)
-        
         st.markdown("### 🗑️ Xóa lệnh giao dịch (Hủy bỏ)")
         
-        # Tạo danh sách các lệnh để người dùng chọn xóa
         delete_options = []
         for idx, row in df_history.iterrows():
             delete_options.append(f"Dòng {idx} | Ngày {row['Ngày']} | {row['Loại lệnh']} {row['Khối lượng']} CP {row['Mã CK']} | Giá: {row['Giá (VNĐ)']}")
@@ -260,16 +280,12 @@ with st.expander("👁️ Quản lý & Xóa Lịch sử Giao dịch", expanded=F
         selected_to_delete = st.selectbox("Chọn lệnh bạn nhập sai hoặc muốn hủy bỏ:", delete_options)
         
         if st.button("❌ Xóa lệnh này"):
-            # Lấy index của dòng cần xóa (từ chuỗi text đã chọn)
             idx_to_delete = int(selected_to_delete.split(" |")[0].replace("Dòng ", ""))
-            
-            # Xóa dòng đó khỏi DataFrame
             df_history = df_history.drop(idx_to_delete).reset_index(drop=True)
             
-            # --- ĐÃ SỬA: LƯU LÊN MÂY THAY VÌ CSV ---
             save_data(df_history)
             
             st.success("Đã xóa lệnh khỏi Google Sheets thành công! Hệ thống đang tải lại số liệu...")
-            st.rerun() # Refresh app để tính lại giá vốn ngay lập tức
+            st.rerun() 
     else:
         st.write("Chưa có lịch sử giao dịch nào.")
